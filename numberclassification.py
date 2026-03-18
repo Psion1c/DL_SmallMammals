@@ -3,104 +3,113 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Dropout, Flatten, Dense
+from tensorflow.keras import layers, models
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Dropout, Dense, Input, BatchNormalization, Flatten
 import numpy as np
 import matplotlib.pyplot as plt
 
-# DATA PREPARATION STAGE
-(coarse_train, coarse_TrLabels), (coarse_test, coarse_TsLabels) = keras.datasets.cifar100.load_data(label_mode='coarse')
+# 1. DATA PREPARATION
 (fine_train, fine_Trlabels), (fine_test, fine_TsLabels) = keras.datasets.cifar100.load_data(label_mode='fine')
+(coarse_train, coarse_TrLabels), (coarse_test, coarse_TsLabels) = keras.datasets.cifar100.load_data(label_mode='coarse')
 
-# Extract specific coarse class (Small Mammals = 16)
-TARGET_COARSE_CLASS = 16
+TARGET_COARSE_CLASS = 16 
 idx_train = [i for i in range(len(coarse_TrLabels)) if coarse_TrLabels[i] == TARGET_COARSE_CLASS]
-print('Total small mammal images from TRAINING DATASET: {}'.format(len(idx_train)))
-
 train_images, train_labels = fine_train[idx_train], fine_Trlabels[idx_train]
-uniq_fineClass = np.unique(train_labels)
 
 idx_test = [i for i in range(len(coarse_TsLabels)) if coarse_TsLabels[i] == TARGET_COARSE_CLASS]
 test_images, test_labels = fine_test[idx_test], fine_TsLabels[idx_test]
 
-# Relabel training and testing dataset to start from zero (0)
+str_class = ['hamster', 'mouse', 'rabbit', 'shrew', 'squirrel']
+uniq_fineClass = np.unique(train_labels)
 for i in range(len(uniq_fineClass)):
-    for j in range(len(train_labels)):
-        if train_labels[j] == uniq_fineClass[i]: train_labels[j] = i
-    for j in range(len(test_labels)):
-        if test_labels[j] == uniq_fineClass[i]: test_labels[j] = i
+    train_labels[train_labels == uniq_fineClass[i]] = i
+    test_labels[test_labels == uniq_fineClass[i]] = i
 
-# Build the model
-model = tf.keras.Sequential()
-model.add(Conv2D(32, kernel_size=(3, 3), activation='relu', input_shape=(32, 32, 3)))
-model.add(MaxPooling2D(pool_size=(2, 2)))
-model.add(Flatten())
-model.add(Dense(128, activation='relu'))
-model.add(Dense(len(uniq_fineClass), activation='softmax'))
+train_images = train_images.astype('float32') / 255.0
+test_images = test_images.astype('float32') / 255.0
 
-model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=[tf.keras.metrics.SparseCategoricalAccuracy()])
+# 2. STABLE AUGMENTATION
+data_augmentation = keras.Sequential([
+  layers.RandomFlip("horizontal"),
+  layers.RandomRotation(0.1),
+])
 
-# Train the model
-metricInfo = model.fit(train_images, train_labels, epochs=10, validation_split=0.1)
+# 3. SIMPLIFIED RELIABLE ARCHITECTURE (Back to early success style)
+model = models.Sequential([
+    Input(shape=(32, 32, 3)),
+    data_augmentation,
+    
+    Conv2D(32, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    MaxPooling2D((2, 2)),
+    Dropout(0.2),
+    
+    Conv2D(64, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    MaxPooling2D((2, 2)),
+    Dropout(0.3),
+    
+    Flatten(), # Returning to Flatten for that "Early Version" direct mapping
+    Dense(128, activation='relu'),
+    Dropout(0.4),
+    Dense(5, activation='softmax')
+])
 
-# Plot training vs validation loss
-loss = metricInfo.history['loss']
-val_loss = metricInfo.history['val_loss']
-epochs = range(1, len(loss) + 1)
-plt.clf()
-plt.plot(epochs, loss, 'g-', label="Training loss")
-plt.plot(epochs, val_loss, 'b', label='Validation loss')
-plt.title('Training vs Validation loss')
+# 4. TRAINING (Fewer epochs for stability)
+model.compile(optimizer='adam', 
+              loss='sparse_categorical_crossentropy', 
+              metrics=['accuracy'])
+
+# Using 30 epochs - enough to learn, not enough to overfit
+history = model.fit(train_images, train_labels, 
+                    epochs=30, 
+                    validation_split=0.2, 
+                    batch_size=32)
+
+# ==========================================
+# 5. VISUALIZATIONS
+# ==========================================
+
+# A. LOSS GRAPH (Should show two smooth lines moving down together)
+plt.figure(figsize=(8, 6), dpi=100)
+plt.plot(history.history['loss'], 'g-', label='Training loss')
+plt.plot(history.history['val_loss'], 'b', label='Validation loss')
+plt.title('Reliable Training vs Validation Loss', fontsize=14)
 plt.xlabel('Epochs')
 plt.ylabel('Loss')
 plt.legend()
-# plt.show() # Commented out so it doesn't pause the script before presentation visuals
-
-# Test the model
-str_class = ['hamster', 'mouse', 'rabbit', 'shrew', 'squirrel']
-test_loss, test_acc = model.evaluate(test_images, test_labels)
-print('Test accuracy:', test_acc)
-
-classification = model.predict(test_images)
-
-# ==========================================
-# PRESENTATION VISUALS
-# ==========================================
-IMAGE_INDEX = 0
-test_img = test_images[IMAGE_INDEX]
-true_label_idx = test_labels[IMAGE_INDEX][0]
-predictions_array = classification[IMAGE_INDEX]
-
-# 1. VISUALIZE CONFIDENCE PROBABILITIES
-plt.figure(figsize=(10, 4))
-plt.subplot(1, 2, 1)
-plt.imshow(test_img, cmap=plt.cm.binary)
-plt.title(f"Actual Image: {str_class[true_label_idx]}")
-plt.axis('off')
-
-plt.subplot(1, 2, 2)
-bars = plt.bar(str_class, predictions_array, color='gray')
-plt.title("Model's Prediction Confidence")
-plt.ylabel("Probability")
-plt.ylim([0, 1])
-
-predicted_label_idx = np.argmax(predictions_array)
-bars[predicted_label_idx].set_color('red')
-bars[true_label_idx].set_color('green')
-plt.tight_layout()
+plt.grid(True, linestyle='--', alpha=0.5)
 plt.show()
 
-# 2. VISUALIZE CONVOLUTIONAL FEATURE MAPS
-layer_outputs = [layer.output for layer in model.layers[:1]]
-activation_model = tf.keras.models.Model(inputs=model.input, outputs=layer_outputs)
-img_tensor = np.expand_dims(test_img, axis=0)
-activations = activation_model.predict(img_tensor)
+# B. MULTI-SAMPLE GRID
+predictions = model.predict(test_images)
+y_pred_classes = np.argmax(predictions, axis=1)
+y_true_classes = test_labels.flatten()
 
-plt.figure(figsize=(12, 4))
-for i in range(4):
-    plt.subplot(1, 4, i+1)
-    plt.imshow(activations[0, :, :, i], cmap='viridis')
+plt.figure(figsize=(15, 8), dpi=120)
+for i in range(10): 
+    plt.subplot(2, 5, i+1)
+    plt.imshow(test_images[i], interpolation='spline36')
+    pred_idx = y_pred_classes[i]
+    confidence = predictions[i][pred_idx] * 100
+    color = 'green' if pred_idx == y_true_classes[i] else 'red'
+    plt.title(f"P: {str_class[pred_idx]} ({confidence:.1f}%)\nA: {str_class[y_true_classes[i]]}", color=color, fontsize=9, fontweight='bold')
     plt.axis('off')
-    plt.title(f'Filter {i+1} Output')
-plt.suptitle("What the First Hidden Layer 'Sees'", fontsize=16)
-plt.tight_layout()
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
+# C. CONFUSION MATRIX
+cm = np.zeros((5, 5), dtype=int)
+for i in range(len(y_true_classes)):
+    cm[y_true_classes[i], y_pred_classes[i]] += 1
+
+plt.figure(figsize=(8, 7), dpi=100)
+plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title('Final Confusion Matrix', fontsize=14)
+plt.colorbar()
+plt.xticks(np.arange(5), str_class, rotation=45)
+plt.yticks(np.arange(5), str_class)
+for i in range(5):
+    for j in range(5):
+        plt.text(j, i, str(cm[i, j]), ha="center", va="center", color="white" if cm[i, j] > (cm.max()/2) else "black")
 plt.show()
