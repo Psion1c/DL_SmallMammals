@@ -10,15 +10,10 @@ from tensorflow.keras.layers import Conv2D, MaxPooling2D, Dropout, Dense, Input,
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ==========================================
-# 1. CONFIGURATION
-# ==========================================
 MODEL_PATH = 'mammal_classifier.keras'
 HISTORY_PATH = 'training_history.csv'
 
-# ==========================================
-# 2. DATA PREPARATION
-# ==========================================
+# Preparation
 (fine_train, fine_Trlabels), (fine_test, fine_TsLabels) = keras.datasets.cifar100.load_data(label_mode='fine')
 (coarse_train, coarse_TrLabels), (coarse_test, coarse_TsLabels) = keras.datasets.cifar100.load_data(label_mode='coarse')
 
@@ -37,15 +32,13 @@ for i in range(len(uniq_fineClass)):
 train_images = train_images.astype('float32') / 255.0
 test_images = test_images.astype('float32') / 255.0
 
-# ==========================================
-# 3. MODEL LOADING / TRAINING
-# ==========================================
+# Training
 if os.path.exists(MODEL_PATH) and os.path.exists(HISTORY_PATH):
     print(f"\n--- Loading saved model and history... ---")
     model = keras.models.load_model(MODEL_PATH)
     history_df = pd.read_csv(HISTORY_PATH)
 else:
-    print("\n--- Starting Smoothed Training... ---")
+    print("\n--- Starting Training... ---")
     
     data_augmentation = keras.Sequential([
       layers.RandomFlip("horizontal"),
@@ -72,7 +65,7 @@ else:
         Dense(5, activation='softmax')
     ])
 
-    # THE FIX: Lowered learning rate from 0.001 to 0.0005 for smoother descent
+    # Solution 1
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.0005)
     model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
@@ -84,7 +77,7 @@ else:
     )
     csv_logger = tf.keras.callbacks.CSVLogger(HISTORY_PATH, append=False)
 
-    # THE FIX: Increased batch_size to 64 to stabilize the loss graph
+    # Solution 2
     history = model.fit(train_images, train_labels, 
                         epochs=120, validation_split=0.2, 
                         batch_size=64, 
@@ -93,9 +86,7 @@ else:
     model.save(MODEL_PATH)
     history_df = pd.DataFrame(history.history)
 
-# ==========================================
-# 4. FINAL EVALUATION & TERMINAL OUTPUT
-# ==========================================
+# Evaluation
 print("\nEvaluating model on unseen test data...")
 test_loss, test_acc = model.evaluate(test_images, test_labels, verbose=0)
 
